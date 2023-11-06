@@ -10,6 +10,8 @@ import random
 import re
 from flask import Flask, request, jsonify, abort
 import redis
+from playwright.sync_api import sync_playwright
+
 
 # Global variable to keep track of the last time we issued a NEWNYM signal
 redis_client = redis.StrictRedis(
@@ -65,15 +67,26 @@ def generate_session():
     return session
 
 
-def get_data(session, url):
+def get_data(url):
+    websiteData = None
+    browser = None
+
     try:
-        response = session.get(url)
-        if response.status_code == 200:
-            return response.text
-        else:
-            return None
+        with sync_playwright() as p:
+            for browser_type in [p.chromium]:
+                browser = browser_type.launch(headless=True, proxy={
+                    "server": "socks5://127.0.0.1:9050"
+                })
+                page = browser.new_page()
+                page.goto(
+                    url, wait_until="networkidle", timeout=0)
+                websiteData = page.content()
+                browser.close()
+        return websiteData
     except Exception as e:
         print(f"An error occurred: {e}")
+        if browser:
+            browser.close()
         return None
 
 
@@ -144,7 +157,7 @@ def getWebsiteData(url):
     while retry:
         torSession = generate_session()
 
-        websiteData = get_data(torSession, url)
+        websiteData = get_data(url)
         if websiteData is not None:
             forbidden_match = re.search(
                 r'403 forbidden', websiteData, re.IGNORECASE)
@@ -155,7 +168,7 @@ def getWebsiteData(url):
                 time.sleep(1)
                 continue  # Continue to the next iteration of the while loop to retry
 
-            proxified_ip = get_data(torSession, binDummyWebsite)
+            proxified_ip = get_data(binDummyWebsite)
             if proxified_ip:
                 print('Proxified ip: ' + proxified_ip)
             print('Getting data from ', url)
@@ -208,6 +221,31 @@ def scrape():
     # For now, we'll just echo back the URL received
     response = getWebsiteData(url)
     return jsonify(response), 200
+
+
+# def run():
+#     # Set up the ChromeOptions
+#     chrome_options = ChromeOptions()
+#     chrome_options.add_argument("--headless")
+#     chrome_options.add_argument("--disable-gpu")
+#     chrome_options.add_argument("--no-sandbox")
+
+#     # Setup proxy to use with Tor
+#     chrome_options.add_argument('--proxy-server=socks5://127.0.0.1:9050')
+
+#     # Specify the path to ChromeDriver executable
+#     # Start a Selenium WebDriver session
+#     driver = webdriver.Chrome(
+#         "/Users/dominiquekanyik/Documents/Playground/Proxify/chromedriver", options=chrome_options)
+
+#     try:
+#         driver.get('http://httpbin.org/ip')
+#         print(driver.page_source)
+#     finally:
+#         driver.quit()
+
+
+# run()
 
 
 if __name__ == '__main__':
