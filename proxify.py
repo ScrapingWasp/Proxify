@@ -66,22 +66,71 @@ def generate_session():
     new_tor_id()
     return session
 
+# Log each request
+
+
+def log_and_continue_request(request):
+    print(f"Request: {request.method} {request.url}")
+
+# Log each response
+
+
+def log_response(response):
+    print(f"Response: {response.status} {response.url}")
+
+# Log console messages (e.g., console.log, errors, warnings)
+
+
+def log_console(msg):
+    print(f"Console message: {msg.type} - {msg.text}")
+
+# Block images, CSS, and fonts
+
+
+def block_resources(route, request):
+    if request.resource_type in ["image", "stylesheet", "font"]:
+        route.abort()
+    else:
+        route.continue_()
+
 
 def get_data(url):
     websiteData = None
     browser = None
 
     try:
-        with sync_playwright() as p:
-            for browser_type in [p.chromium]:
-                browser = browser_type.launch(headless=True, proxy={
-                    "server": "socks5://127.0.0.1:9050"
-                })
-                page = browser.new_page()
-                page.goto(
-                    url, wait_until="networkidle", timeout=0)
-                websiteData = page.content()
-                browser.close()
+        with sync_playwright() as playwright:
+            chromium = playwright.chromium
+            browser = chromium.launch(headless=True, proxy={
+                "server": "socks5://127.0.0.1:9050"
+            })
+
+            context = browser.new_context()
+
+            page = context.new_page()
+
+            # Define the pattern to match files we want to block
+            block_pattern = re.compile(
+                r"\.(png|jpg|jpeg|gif|woff2|pdf|docx|svg|ttf|css)$",
+                re.IGNORECASE
+            )
+
+            # Abort requests that match the pattern
+            page.route(block_pattern, lambda route: route.abort())
+
+            # Add event listeners
+            page.on("request", log_and_continue_request)
+            page.on("response", log_response)
+            page.on("console", log_console)
+
+            page.goto(url, wait_until="networkidle", timeout=0)
+            websiteData = page.content()
+
+            page.remove_listener("request", log_and_continue_request)
+            page.remove_listener("response", log_response)
+            page.remove_listener("console", log_console)
+
+            browser.close()
         return websiteData
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -221,31 +270,6 @@ def scrape():
     # For now, we'll just echo back the URL received
     response = getWebsiteData(url)
     return jsonify(response), 200
-
-
-# def run():
-#     # Set up the ChromeOptions
-#     chrome_options = ChromeOptions()
-#     chrome_options.add_argument("--headless")
-#     chrome_options.add_argument("--disable-gpu")
-#     chrome_options.add_argument("--no-sandbox")
-
-#     # Setup proxy to use with Tor
-#     chrome_options.add_argument('--proxy-server=socks5://127.0.0.1:9050')
-
-#     # Specify the path to ChromeDriver executable
-#     # Start a Selenium WebDriver session
-#     driver = webdriver.Chrome(
-#         "/Users/dominiquekanyik/Documents/Playground/Proxify/chromedriver", options=chrome_options)
-
-#     try:
-#         driver.get('http://httpbin.org/ip')
-#         print(driver.page_source)
-#     finally:
-#         driver.quit()
-
-
-# run()
 
 
 if __name__ == '__main__':
